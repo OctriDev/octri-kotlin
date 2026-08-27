@@ -9,7 +9,25 @@
   <name>Octri Monitoring for Kotlin</name>
   <description>Standalone application monitoring and error reporting for Kotlin.</description>
   <url>https://octri.dev</url>
-  <licenses><license><name>MIT</name></license></licenses>
+  <licenses>
+    <license>
+      <name>MIT License</name>
+      <url>https://opensource.org/licenses/MIT</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+  <developers>
+    <developer>
+      <name>Octri</name>
+      <organization>Octri</organization>
+      <organizationUrl>https://octri.dev</organizationUrl>
+    </developer>
+  </developers>
+  <scm>
+    <connection>scm:git:https://github.com/octridev/octri-kotlin.git</connection>
+    <developerConnection>scm:git:ssh://git@github.com/octridev/octri-kotlin.git</developerConnection>
+    <url>https://github.com/octridev/octri-kotlin</url>
+  </scm>
   <properties>
     <kotlin.version>1.9.24</kotlin.version>
     <junit.version>5.10.2</junit.version>
