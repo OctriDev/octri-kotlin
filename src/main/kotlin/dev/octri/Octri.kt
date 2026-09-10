@@ -9,16 +9,67 @@ import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
 
+/**
+ * Connection settings for one Octri monitoring project.
+ *
+ * Hosted users can copy the URL, token and environment from the Monitoring
+ * connection settings in the dashboard.
+ *
+ * @property url Base URL of the monitoring backend. [Octri.init] stores it with
+ *   any trailing slashes removed.
+ * @property token Project ingest token, sent as a bearer token on every request.
+ *   Optional only for open self-hosted ingestion. Hosted Octri requires it.
+ * @property environment Dashboard project id that received events and spans are
+ *   filed under.
+ * @property release Release this process is running, such as a commit SHA.
+ */
 data class OctriConfig(
     val url: String,
-    /** Optional only for open self-hosted ingestion. Hosted Octri requires it. */
     val token: String?,
     val environment: String,
     val release: String? = null,
 )
 
+/**
+ * Identifies one W3C distributed trace, and the span that called into this
+ * process.
+ *
+ * @property traceId Hexadecimal id, 32 characters long, shared by every span in
+ *   the trace.
+ * @property parentSpanId Hexadecimal id, 16 characters long, of the span that
+ *   called this process. Null when this process started the trace.
+ */
 data class OctriTraceContext(val traceId: String, val parentSpanId: String? = null)
 
+/**
+ * Optional detail attached to a call to [Octri.captureEvent].
+ *
+ * A null field is dropped from the payload rather than sent as a null.
+ *
+ * @property timestamp When the event happened, as an ISO-8601 string. Defaults
+ *   to the time of the call.
+ * @property level Severity, such as `info`, `warning` or `error`.
+ * @property operationId OpenAPI operation id the event belongs to.
+ * @property method HTTP method of the request the event describes.
+ * @property path Request path the event describes.
+ * @property statusCode HTTP status code the request ended with.
+ * @property latencyMs How long the described work took, in milliseconds.
+ * @property attempt Retry number, counting from 1 for the first attempt.
+ * @property requestId Your own correlation id for the request.
+ * @property user Who the event happened to, such as a map holding an `id`.
+ * @property tags Searchable keys and values, such as region or plan. Octri sets
+ *   `octri.origin` itself; these are merged over it.
+ * @property context Free-form detail shown alongside the event in the dashboard.
+ * @property breadcrumbs Steps leading up to the event, oldest first.
+ * @property fingerprint Overrides how the dashboard groups this event with
+ *   similar ones.
+ * @property trace Trace the event belongs to, usually from
+ *   [Octri.traceFromHeader].
+ * @property spanId Span within that trace the event was raised in.
+ * @property eventId Idempotency key for the delivery. Pass the same value when
+ *   retrying so the backend stores the event once. A value that is empty or
+ *   carries a carriage return or newline is replaced with a random id.
+ */
 data class OctriEventOptions(
     val timestamp: String? = null,
     val level: String = "info",
@@ -39,6 +90,17 @@ data class OctriEventOptions(
     val eventId: String? = null,
 )
 
+/**
+ * Optional detail attached to a call to [Octri.captureError].
+ *
+ * @property level Severity, such as `error` or `fatal`.
+ * @property operationId OpenAPI operation id the failure happened under.
+ * @property method HTTP method of the request that failed.
+ * @property path Request path that failed.
+ * @property statusCode HTTP status code the failed request ended with.
+ * @property trace Trace to file the error under, usually from
+ *   [Octri.traceFromHeader]. When null, the error starts a new trace of its own.
+ */
 data class OctriErrorOptions(
     val level: String = "error",
     val operationId: String? = null,
@@ -48,6 +110,24 @@ data class OctriErrorOptions(
     val trace: OctriTraceContext? = null,
 )
 
+/**
+ * One timed unit of work, drawn as a bar in the dashboard waterfall.
+ *
+ * [Octri.captureSpan] drops any span whose [traceId], [spanId], [name] or
+ * [startTime] is empty.
+ *
+ * @property traceId Id of the trace this span belongs to.
+ * @property spanId Id of this span, unique within the trace.
+ * @property parentSpanId Id of the enclosing span, or null when this is the root
+ *   of the trace.
+ * @property name Readable name for the work, such as `orders.list`.
+ * @property service Side of the call the span was recorded on.
+ * @property operationId OpenAPI operation id the span belongs to.
+ * @property startTime When the work started, as an ISO-8601 string.
+ * @property endTime When the work finished, as an ISO-8601 string, or null while
+ *   it is still running.
+ * @property status How the work ended, such as `ok` or `error`.
+ */
 data class OctriSpan(
     val traceId: String,
     val spanId: String,
@@ -74,11 +154,32 @@ object Octri {
     @Volatile
     private var config: OctriConfig? = null
 
+    /**
+     * Points every later call at the project described by [value].
+     *
+     * Call this once at startup. Until it runs, [captureEvent], [captureError]
+     * and [captureSpan] return without sending anything. Any trailing slashes
+     * on the configured URL are trimmed here. Calling it again replaces the
+     * settings used by subsequent calls.
+     *
+     * @param value the settings to report under
+     */
     @JvmStatic
     fun init(value: OctriConfig) {
         config = value.copy(url = value.url.trimEnd('/'))
     }
 
+    /**
+     * Reads a W3C `traceparent` header into a trace context.
+     *
+     * Returns the trace and parent span carried by [value] when it is a
+     * well-formed version `00` header. Returns a context holding a fresh random
+     * trace id and no parent when the header is null, malformed, or carries an
+     * all-zero trace or parent id, so the caller always gets a usable trace.
+     *
+     * @param value the inbound `traceparent` header, or null
+     * @return the trace to report under
+     */
     @JvmStatic
     fun traceFromHeader(value: String?): OctriTraceContext {
         val match = value?.trim()?.let(traceparent::matchEntire)
@@ -92,7 +193,15 @@ object Octri {
         }
     }
 
-    /** Log an event without depending on a generated Octri API SDK. */
+    /**
+     * Logs an event, without depending on a generated Octri API SDK.
+     *
+     * Returns immediately; the send happens in the background. Does nothing
+     * when [init] has not run.
+     *
+     * @param message what happened
+     * @param options extra detail to attach
+     */
     @JvmStatic
     fun captureEvent(message: String, options: OctriEventOptions = OctriEventOptions()) {
         val config = config ?: return
@@ -125,6 +234,18 @@ object Octri {
         post(config, "/ingest", payload, eventId)
     }
 
+    /**
+     * Reports [error], with one symbolic frame per line of its stack.
+     *
+     * Frames outside `java.`, `kotlin.` and `sun.` are marked as in-app, so the
+     * dashboard shows your own code first. Files the error under the trace in
+     * [options], or under a new trace of its own when none is given. Returns
+     * immediately; the send happens in the background. Does nothing when [init]
+     * has not run.
+     *
+     * @param error the exception to report
+     * @param options request and trace detail to attach
+     */
     @JvmStatic
     fun captureError(error: Throwable, options: OctriErrorOptions = OctriErrorOptions()) {
         val config = config ?: return
@@ -164,6 +285,15 @@ object Octri {
         post(config, "/ingest", payload, eventId)
     }
 
+    /**
+     * Records [span] as one bar in the dashboard request waterfall.
+     *
+     * Ignores a span whose trace id, span id, name or start time is empty.
+     * Returns immediately; the send happens in the background. Does nothing
+     * when [init] has not run.
+     *
+     * @param span the finished span to report
+     */
     @JvmStatic
     fun captureSpan(span: OctriSpan) {
         val config = config ?: return
