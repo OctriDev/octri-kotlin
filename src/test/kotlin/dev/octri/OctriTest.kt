@@ -37,6 +37,31 @@ class OctriTest {
     }
 
     @Test
+    fun `replaces an oversized event id`() {
+        val received = CountDownLatch(1)
+        val idempotencyKey = AtomicReference<String>()
+        server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0).also { http ->
+            http.createContext("/ingest") { exchange ->
+                idempotencyKey.set(exchange.requestHeaders.getFirst("idempotency-key"))
+                exchange.sendResponseHeaders(202, -1)
+                exchange.close()
+                received.countDown()
+            }
+            http.start()
+        }
+
+        Octri.init(OctriConfig(
+            url = "http://127.0.0.1:${server!!.address.port}/",
+            token = "project-token",
+            environment = "project-1",
+        ))
+        Octri.captureEvent("checkout.completed", OctriEventOptions(eventId = "e".repeat(257)))
+
+        assertTrue(received.await(3, TimeUnit.SECONDS))
+        assertTrue(Regex("^[0-9a-f]{32}$").matches(idempotencyKey.get()))
+    }
+
+    @Test
     fun `sends scoped idempotent json without header injection`() {
         val received = CountDownLatch(1)
         val body = AtomicReference<String>()

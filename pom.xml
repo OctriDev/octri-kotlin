@@ -5,7 +5,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>dev.octri</groupId>
   <artifactId>octri-monitoring-kotlin</artifactId>
-  <version>1.0.1</version>
+  <version>1.1.0</version>
   <name>Octri Monitoring for Kotlin</name>
   <description>Standalone application monitoring and error reporting for Kotlin.</description>
   <url>https://octri.dev</url>
@@ -86,6 +86,8 @@
   <profiles>
     <profile>
       <id>release</id>
+      <!-- Build this profile on JDK 21. Dokka fails to parse newer JDK
+           version strings and aborts the javadoc jar. -->
       <build>
         <plugins>
         <plugin>
