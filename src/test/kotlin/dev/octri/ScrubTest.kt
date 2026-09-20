@@ -152,8 +152,10 @@ class ScrubTest {
 
     // ── The user field ──────────────────────────────────────────────────────
 
+    // The identity the dashboard keys on is "id", which survives. Direct
+    // identifiers under the user are redacted like they are in every generated SDK.
     @Test
-    fun `keeps user identity but not user credentials`() {
+    fun `keeps user id but not user credentials or identifiers`() {
         Octri.captureEvent(
             "profile update failed",
             OctriEventOptions(
@@ -161,13 +163,24 @@ class ScrubTest {
                     "id" to "u_1",
                     "email" to "ada@example.com",
                     "sessionToken" to "st_1",
+                    "customerPhone" to "+1 555 0100",
+                ),
+                context = mapOf(
+                    "billingAddress" to "1 High St",
+                    "avatarUrl" to "https://cdn.example.com/a.png",
+                    "queryTimeMs" to 12,
                 ),
             ),
         )
 
         val body = next()
-        assertTrue(body.contains("\"email\":\"ada@example.com\""), body)
+        assertTrue(body.contains("\"id\":\"u_1\""), body)
+        assertTrue(body.contains("\"email\":\"[redacted]\""), body)
         assertTrue(body.contains("\"sessionToken\":\"[redacted]\""), body)
+        assertTrue(body.contains("\"customerPhone\":\"[redacted]\""), body)
+        assertTrue(body.contains("\"billingAddress\":\"[redacted]\""), body)
+        assertTrue(body.contains("\"avatarUrl\":\"https://cdn.example.com/a.png\""), body)
+        assertTrue(body.contains("\"queryTimeMs\":12"), body)
     }
 
     // ── setBeforeSend ───────────────────────────────────────────────────────
